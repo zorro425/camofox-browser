@@ -483,6 +483,30 @@ export class ContextPool {
 		return this.ensureContext(targetProfileKey, normalized, options, resolvedProxy);
 	}
 
+	/**
+	 * Get the effective display mode for a user.
+	 * Returns: true (headless), false (headed), 'virtual' (virtual display), or null (no session)
+	 */
+	getDisplayMode(userId: string): boolean | 'virtual' | null {
+		const normalized = String(userId);
+
+		// Find any active context for this userId (pool is keyed by profileKey now)
+		for (const entry of this.pool.values()) {
+			if (entry.userId !== normalized) continue;
+
+			// Return the override or the default from CONFIG
+			const override = this.headlessOverrides.get(normalized);
+			if (override !== undefined) {
+				return override;
+			}
+
+			// Fall back to global config
+			return CONFIG.headless;
+		}
+
+		return null;
+	}
+
 	private async evictIfNeeded(): Promise<void> {
 		if (this.pool.size <= MAX_CONTEXTS) return;
 

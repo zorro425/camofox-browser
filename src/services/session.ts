@@ -705,6 +705,31 @@ export function findTabById(
 	return null;
 }
 
+// Find tab by tabId only (without requiring userId) - useful for Hermes compatibility
+export function findTabByIdOnly(tabId: string):
+	| (ReturnType<typeof findTab> & {
+			sessionKey: string;
+			session: SessionData;
+		})
+	| null {
+	const indexedKey = tabSessionIndex.get(tabId);
+	if (!indexedKey) return null;
+
+	const session = sessions.get(indexedKey);
+	if (!session) {
+		tabSessionIndex.delete(tabId);
+		return null;
+	}
+
+	const found = findTab(session, tabId);
+	if (found) {
+		return { sessionKey: indexedKey, session, ...found };
+	}
+
+	tabSessionIndex.delete(tabId);
+	return null;
+}
+
 function buildBrowserContextOptions(contextOverrides?: ContextOverrides | null, hasSessionProxy = false): BrowserContextOptions {
 	const resolved = contextOverrides || {};
 	const contextOptions: BrowserContextOptions = {

@@ -1,39 +1,28 @@
-node_modules/
-.env
-.env.local
-.env.*.local
+# Profiles directory (user data)
+profiles/
+cookies/
 
 # Logs
-logs/
 *.log
-npm-debug.log*
+logs/
 
-# Runtime
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage
-coverage/
-.nyc_output/
-
-# Build
+# Node
+node_modules/
 dist/
 build/
 *.tsbuildinfo
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Camoufox cache
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Camoufox
 .camoufox/
 
 # Test artifacts
@@ -49,3 +38,4 @@ CLAUDE.md
 AGENTS.md
 production
 docs/*
+*.zip

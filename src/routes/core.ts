@@ -25,6 +25,7 @@ import {
 	createStagedSession,
 	establishSessionProfile,
 	findTabById,
+	findTabByIdOnly,
 	getCanonicalProfile,
 	getEstablishedSessionProfile,
 	getSession,
@@ -919,39 +920,56 @@ router.post(
 	},
 );
 
+// Shared handler for JS evaluation
+async function handleEvaluate(
+	req: Request<{ tabId: string }, unknown, { userId?: unknown; expression?: unknown; timeout?: number }>,
+	res: Response,
+): Promise<void> {
+	const tabId = req.params.tabId;
+	try {
+		if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+			return void res.status(403).json({ error: 'Forbidden' });
+		}
+
+		const { userId, expression, timeout } = req.body;
+		if (!expression || typeof expression !== 'string') {
+			return void res.status(400).json({ error: 'expression is required and must be a string' });
+		}
+		if (expression.length > 65536) {
+			return void res.status(400).json({ error: 'expression exceeds maximum length of 64KB' });
+		}
+
+		// Try to find tab - first with userId if provided, then by tabId only
+		let found = userId ? findTabById(tabId, userId) : null;
+		if (!found) {
+			found = findTabByIdOnly(tabId);
+		}
+		if (!found) return void res.status(404).json({ error: 'Tab not found' });
+		const { tabState } = found;
+		tabState.toolCalls++;
+
+		const result = await evaluateTab(tabId, tabState, { expression, timeout });
+		lifecycleController.recordInteractiveActivity();
+		return void res.json(result);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		log('error', 'evaluate failed', { reqId: req.reqId, tabId, error: message });
+		return void res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
+	}
+}
+
 // Evaluate JS (API key optional)
 router.post(
 	'/tabs/:tabId/evaluate',
 	express.json({ limit: '64kb' }),
-	async (req: Request<{ tabId: string }, unknown, { userId?: unknown; expression?: unknown; timeout?: number }>, res: Response) => {
-		const tabId = req.params.tabId;
-		try {
-			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
-				return res.status(403).json({ error: 'Forbidden' });
-			}
+	handleEvaluate,
+);
 
-			const { userId, expression, timeout } = req.body;
-			if (!expression || typeof expression !== 'string') {
-				return res.status(400).json({ error: 'expression is required and must be a string' });
-			}
-			if (expression.length > 65536) {
-				return res.status(400).json({ error: 'expression exceeds maximum length of 64KB' });
-			}
-
-			const found = findTabById(tabId, userId);
-			if (!found) return res.status(404).json({ error: 'Tab not found' });
-			const { tabState } = found;
-			tabState.toolCalls++;
-
-			const result = await evaluateTab(tabId, tabState, { expression, timeout });
-			lifecycleController.recordInteractiveActivity();
-			return res.json(result);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			log('error', 'evaluate failed', { reqId: req.reqId, tabId, error: message });
-			return res.status(getRouteErrorStatus(err)).json({ error: safeError(err) });
-		}
-	},
+// Evaluate JS - /eval alias for compatibility (API key optional)
+router.post(
+	'/tabs/:tabId/eval',
+	express.json({ limit: '64kb' }),
+	handleEvaluate,
 );
 
 // Evaluate JS extended (API key optional)
@@ -1413,6 +1431,53 @@ router.post(
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			log('error', 'toggle display failed', { error: message });
+			return res.status(500).json({ error: safeError(err) });
+		}
+	},
+);
+
+// GET /sessions/:userId/display-mode — Query current display mode
+router.get(
+	'/sessions/:userId/display-mode',
+	async (
+		req: Request<{ userId: string }, unknown, unknown, { userId?: unknown }>,
+		res: Response,
+	) => {
+		try {
+			if (CONFIG.apiKey && !isAuthorizedWithApiKey(req as unknown as Request, CONFIG.apiKey)) {
+				return res.status(403).json({ error: 'Forbidden' });
+			}
+
+			const userId = normalizeUserId(req.params.userId);
+
+			// Get display mode from context pool
+			const mode = contextPool.getDisplayMode(userId);
+
+			if (mode === null) {
+				return res.status(404).json({
+					ok: false,
+					error: 'No active session for this user',
+					userId,
+				});
+			}
+
+			// mode is: true (headless), false (headed), or 'virtual' (virtual display)
+			const modeLabel = mode === true
+				? 'headless'
+				: mode === 'virtual'
+					? 'virtual'
+					: 'headed';
+
+			return res.json({
+				ok: true,
+				headless: mode === true,
+				virtual: mode === 'virtual',
+				mode: modeLabel,
+				userId,
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			log('error', 'get display mode failed', { error: message });
 			return res.status(500).json({ error: safeError(err) });
 		}
 	},
